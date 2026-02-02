@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Carbon Tracker - Mobile GPS</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        button { padding: 12px; margin: 10px; font-size: 16px; }
+        .success { color: green; font-weight: bold; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h2>📱 Track Your Daily Commute</h2>
+    
+    <div id="status">Ready to track...</div>
+    
+    <button onclick="startTracking()">📍 Start Tracking</button>
+    <button onclick="stopTracking()">⏹️ Stop Tracking</button>
+    
+    <div id="results" style="margin-top: 20px;"></div>
+    
+    <script>
+        let watchId = null;
+        let locations = [];
+        
+        function startTracking() {
+            if (!navigator.geolocation) {
+                showError("Geolocation not supported");
+                return;
+            }
+            
+            document.getElementById('status').innerHTML = "🎯 Tracking started...";
+            document.getElementById('status').className = "success";
+            
+            // Get location every 30 seconds
+            watchId = navigator.geolocation.watchPosition(
+                (position) => {
+                    const loc = {
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude,
+                        time: new Date().toISOString(),
+                        speed: position.coords.speed || 0
+                    };
+                    locations.push(loc);
+                    
+                    // Update display
+                    updateDisplay();
+                },
+                (error) => {
+                    showError("Error: " + error.message);
+                },
+                {
+                    enableHighAccuracy: true,
+                    maximumAge: 30000,
+                    timeout: 27000
+                }
+            );
+        }
+        
+        function stopTracking() {
+            if (watchId) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+                
+                // Calculate distance
+                const distance = calculateTotalDistance();
+                const vehicle = detectVehicle();
+                
+                // Show results
+                document.getElementById('results').innerHTML = `
+                    <h3>✅ Tracking Complete!</h3>
+                    <p><strong>Distance:</strong> ${distance.toFixed(1)} km</p>
+                    <p><strong>Vehicle:</strong> ${vehicle}</p>
+                    
+                    <button onclick="sendToServer()">📤 Send to Carbon Calculator</button>
+                `;
+                
+                document.getElementById('status').innerHTML = "Tracking stopped";
+            }
+        }
+        
+        function calculateTotalDistance() {
+            if (locations.length < 2) return 0;
+            
+            let total = 0;
+            for (let i = 1; i < locations.length; i++) {
+                total += haversineDistance(
+                    locations[i-1].lat, locations[i-1].lng,
+                    locations[i].lat, locations[i].lng
+                );
+            }
+            return total;
+        }
+        
+        function detectVehicle() {
+            if (locations.length < 2) return "Unknown";
+            
+            // Calculate average speed in km/h
+            let speeds = [];
+            for (let loc of locations) {
+                if (loc.speed > 0) {
+                    speeds.push(loc.speed * 3.6); // m/s to km/h
+                }
+            }
+            
+            const avgSpeed = speeds.length > 0 
+                ? speeds.reduce((a, b) => a + b) / speeds.length 
+                : 0;
+            
+            // Vehicle detection logic
+            if (avgSpeed < 3) return "Walking";
+            else if (avgSpeed < 15) return "Bicycle";
+            else if (avgSpeed < 25) return "Bus";
+            else if (avgSpeed < 60) return "Car";
+            else return "Car/Vehicle";
+        }
+        
+        function haversineDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Earth's radius in km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = 
+                Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+        
+        function updateDisplay() {
+            const distance = calculateTotalDistance();
+            const vehicle = detectVehicle();
+            
+            document.getElementById('status').innerHTML = 
+                `📍 Tracking... | Distance: ${distance.toFixed(1)} km | Vehicle: ${vehicle}`;
+        }
+        
+        function showError(msg) {
+            document.getElementById('status').innerHTML = msg;
+            document.getElementById('status').className = "error";
+        }
+        
+        function sendToServer() {
+            const distance = calculateTotalDistance();
+            const vehicle = detectVehicle();
+            
+            // Create a unique code to send back to Colab
+            const code = `${distance.toFixed(1)}_${vehicle}_${Date.now()}`;
+            
+            document.getElementById('results').innerHTML += `
+                <p><strong>Your Code:</strong> <code>${code}</code></p>
+                <p>📋 Copy this code and paste it in Google Colab</p>
+            `;
+        }
+    </script>
+</body>
+</html>
