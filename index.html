@@ -4,155 +4,399 @@
     <title>Carbon Tracker - Mobile GPS</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { font-family: Arial; padding: 20px; }
-        button { padding: 12px; margin: 10px; font-size: 16px; }
-        .success { color: green; font-weight: bold; }
-        .error { color: red; }
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+        button { padding: 15px 25px; margin: 10px; font-size: 18px; border: none; border-radius: 8px; cursor: pointer; }
+        .start-btn { background: #4CAF50; color: white; }
+        .stop-btn { background: #f44336; color: white; }
+        .success { color: green; font-weight: bold; font-size: 18px; }
+        .error { color: red; font-size: 18px; }
+        .results { background: #f5f5f5; padding: 20px; border-radius: 10px; margin-top: 20px; }
+        .code { font-family: monospace; background: white; padding: 15px; border: 2px dashed #ccc; font-size: 20px; margin: 15px 0; }
+        .instruction { background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 5px solid #2196F3; }
+        .status-box { padding: 15px; background: #fff3cd; border-radius: 8px; margin: 15px 0; border: 2px solid #ffc107; }
+        .distance-display { font-size: 36px; font-weight: bold; color: #2196F3; text-align: center; margin: 20px 0; }
+        .vehicle-select { margin: 20px 0; }
+        .vehicle-option { display: inline-block; padding: 10px 20px; margin: 5px; background: #e0e0e0; border-radius: 5px; cursor: pointer; }
+        .vehicle-option.selected { background: #2196F3; color: white; }
     </style>
 </head>
 <body>
-    <h2>📱 Track Your Daily Commute</h2>
+    <h1>🚗 Carbon Tracker GPS</h1>
+    <p>Track your commute distance in real-time for carbon footprint calculation</p>
     
-    <div id="status">Ready to track...</div>
+    <div class="instruction">
+        <strong>📱 How to use:</strong>
+        <ol>
+            <li>Click <strong>START TRACKING</strong> button</li>
+            <li>Allow location access when prompted</li>
+            <li>Begin your journey (walk, drive, etc.)</li>
+            <li>Watch distance update in real-time</li>
+            <li>Click <strong>STOP TRACKING</strong> when you arrive</li>
+            <li>Select your vehicle type</li>
+            <li>Copy the generated code</li>
+            <li>Paste the code in Google Colab</li>
+        </ol>
+    </div>
     
-    <button onclick="startTracking()">📍 Start Tracking</button>
-    <button onclick="stopTracking()">⏹️ Stop Tracking</button>
+    <div class="status-box">
+        <div id="status">📍 Ready to start tracking...</div>
+        <div id="gpsStatus" style="font-size: 14px; color: #666;">GPS: Waiting...</div>
+    </div>
     
-    <div id="results" style="margin-top: 20px;"></div>
+    <div class="distance-display" id="distanceDisplay">0.0 km</div>
+    
+    <button class="start-btn" onclick="startTracking()">📍 START TRACKING</button>
+    <button class="stop-btn" onclick="stopTracking()">⏹️ STOP TRACKING</button>
+    <button onclick="resetTracking()">🔄 RESET</button>
+    
+    <div class="vehicle-select" id="vehicleSelect" style="display: none;">
+        <h3>Select Your Vehicle Type:</h3>
+        <div class="vehicle-option" onclick="selectVehicle('Car')">🚗 Car</div>
+        <div class="vehicle-option" onclick="selectVehicle('Bus')">🚌 Bus</div>
+        <div class="vehicle-option" onclick="selectVehicle('Electric Vehicle')">⚡ Electric Vehicle</div>
+        <div class="vehicle-option" onclick="selectVehicle('Motorcycle')">🏍️ Motorcycle</div>
+        <div class="vehicle-option" onclick="selectVehicle('Auto')">🛺 Auto</div>
+        <div class="vehicle-option" onclick="selectVehicle('Walking')">🚶 Walking</div>
+        <div class="vehicle-option" onclick="selectVehicle('Bicycle')">🚲 Bicycle</div>
+        <p id="selectedVehicle">Selected: None</p>
+    </div>
+    
+    <div class="results" id="results" style="display: none;">
+        <h2>✅ Tracking Complete!</h2>
+        <p><strong>Total Distance:</strong> <span id="finalDistance">0.0</span> km</p>
+        <p><strong>Vehicle Type:</strong> <span id="finalVehicle">None</span></p>
+        <p><strong>GPS Points Recorded:</strong> <span id="pointCount">0</span></p>
+        <p><strong>Tracking Time:</strong> <span id="trackingTime">0</span> seconds</p>
+        
+        <h3>📋 Your Tracking Code:</h3>
+        <div class="code" id="trackingCode">Waiting for vehicle selection...</div>
+        
+        <button onclick="copyToClipboard()" style="background: #2196F3; color: white; padding: 12px 25px;">
+            📋 COPY CODE TO CLIPBOARD
+        </button>
+        
+        <p style="color: #666; margin-top: 10px;">
+            Paste this code in the Google Colab program when prompted
+        </p>
+    </div>
     
     <script>
+        // Global variables
         let watchId = null;
         let locations = [];
+        let selectedVehicle = null;
+        let startTime = null;
+        let timerInterval = null;
         
+        // Start tracking function
         function startTracking() {
             if (!navigator.geolocation) {
-                showError("Geolocation not supported");
+                showError("Geolocation is not supported by your browser.");
                 return;
             }
             
-            document.getElementById('status').innerHTML = "🎯 Tracking started...";
-            document.getElementById('status').className = "success";
+            // Reset any existing tracking
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+            }
             
-            // Get location every 30 seconds
-            watchId = navigator.geolocation.watchPosition(
-                (position) => {
+            // Reset tracking data
+            locations = [];
+            selectedVehicle = null;
+            startTime = new Date();
+            
+            // Update UI
+            document.getElementById('status').innerHTML = "🎯 <strong>Tracking started...</strong>";
+            document.getElementById('status').className = "success";
+            document.getElementById('gpsStatus').innerHTML = "GPS: Active (updating every 3 seconds)";
+            document.getElementById('vehicleSelect').style.display = 'none';
+            document.getElementById('results').style.display = 'none';
+            
+            // Clear any existing vehicle selection
+            document.querySelectorAll('.vehicle-option').forEach(el => {
+                el.classList.remove('selected');
+            });
+            document.getElementById('selectedVehicle').innerHTML = "Selected: None";
+            
+            // Start timer
+            startTimer();
+            
+            // Get initial position with high accuracy
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    // Success - add first point
                     const loc = {
                         lat: position.coords.latitude,
                         lng: position.coords.longitude,
                         time: new Date().toISOString(),
-                        speed: position.coords.speed || 0
+                        accuracy: position.coords.accuracy
                     };
                     locations.push(loc);
                     
                     // Update display
                     updateDisplay();
+                    
+                    // Start watching position with more frequent updates
+                    watchId = navigator.geolocation.watchPosition(
+                        function(pos) {
+                            const newLoc = {
+                                lat: pos.coords.latitude,
+                                lng: pos.coords.longitude,
+                                time: new Date().toISOString(),
+                                accuracy: pos.coords.accuracy
+                            };
+                            
+                            // Only add point if it's significantly different from last point
+                            if (locations.length === 0 || 
+                                calculateDistance(locations[locations.length-1], newLoc) > 0.001) {
+                                locations.push(newLoc);
+                                updateDisplay();
+                            }
+                        },
+                        function(error) {
+                            handleGeolocationError(error);
+                        },
+                        {
+                            enableHighAccuracy: true,  // Use GPS if available
+                            maximumAge: 0,            // Don't use cached position
+                            timeout: 10000           // 10 second timeout
+                        }
+                    );
                 },
-                (error) => {
-                    showError("Error: " + error.message);
+                function(error) {
+                    handleGeolocationError(error);
                 },
                 {
                     enableHighAccuracy: true,
-                    maximumAge: 30000,
-                    timeout: 27000
+                    timeout: 15000,
+                    maximumAge: 0
                 }
             );
         }
         
+        // Stop tracking function
         function stopTracking() {
-            if (watchId) {
+            if (watchId !== null) {
                 navigator.geolocation.clearWatch(watchId);
                 watchId = null;
                 
-                // Calculate distance
+                // Stop timer
+                clearInterval(timerInterval);
+                
+                // Update status
+                document.getElementById('status').innerHTML = "⏹️ <strong>Tracking stopped</strong>";
+                document.getElementById('status').className = "";
+                document.getElementById('gpsStatus').innerHTML = "GPS: Stopped";
+                
+                // Calculate final distance
                 const distance = calculateTotalDistance();
-                const vehicle = detectVehicle();
+                document.getElementById('finalDistance').textContent = distance.toFixed(2);
+                document.getElementById('pointCount').textContent = locations.length;
                 
-                // Show results
-                document.getElementById('results').innerHTML = `
-                    <h3>✅ Tracking Complete!</h3>
-                    <p><strong>Distance:</strong> ${distance.toFixed(1)} km</p>
-                    <p><strong>Vehicle:</strong> ${vehicle}</p>
-                    
-                    <button onclick="sendToServer()">📤 Send to Carbon Calculator</button>
-                `;
+                // Show vehicle selection
+                document.getElementById('vehicleSelect').style.display = 'block';
                 
-                document.getElementById('status').innerHTML = "Tracking stopped";
+                // Show results section
+                document.getElementById('results').style.display = 'block';
+                
+                // Scroll to results
+                document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
             }
         }
         
-        function calculateTotalDistance() {
-            if (locations.length < 2) return 0;
-            
-            let total = 0;
-            for (let i = 1; i < locations.length; i++) {
-                total += haversineDistance(
-                    locations[i-1].lat, locations[i-1].lng,
-                    locations[i].lat, locations[i].lng
-                );
-            }
-            return total;
-        }
-        
-        function detectVehicle() {
-            if (locations.length < 2) return "Unknown";
-            
-            // Calculate average speed in km/h
-            let speeds = [];
-            for (let loc of locations) {
-                if (loc.speed > 0) {
-                    speeds.push(loc.speed * 3.6); // m/s to km/h
-                }
+        // Reset tracking function
+        function resetTracking() {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
             }
             
-            const avgSpeed = speeds.length > 0 
-                ? speeds.reduce((a, b) => a + b) / speeds.length 
-                : 0;
+            // Clear all data
+            locations = [];
+            selectedVehicle = null;
+            startTime = null;
             
-            // Vehicle detection logic
-            if (avgSpeed < 3) return "Walking";
-            else if (avgSpeed < 15) return "Bicycle";
-            else if (avgSpeed < 25) return "Bus";
-            else if (avgSpeed < 60) return "Car";
-            else return "Car/Vehicle";
+            // Clear timer
+            clearInterval(timerInterval);
+            
+            // Reset UI
+            document.getElementById('status').innerHTML = "📍 Ready to start tracking...";
+            document.getElementById('status').className = "";
+            document.getElementById('gpsStatus').innerHTML = "GPS: Waiting...";
+            document.getElementById('distanceDisplay').textContent = "0.0 km";
+            document.getElementById('vehicleSelect').style.display = 'none';
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('selectedVehicle').innerHTML = "Selected: None";
+            
+            // Clear vehicle selection
+            document.querySelectorAll('.vehicle-option').forEach(el => {
+                el.classList.remove('selected');
+            });
         }
         
-        function haversineDistance(lat1, lon1, lat2, lon2) {
+        // Calculate distance between two points (Haversine formula)
+        function calculateDistance(point1, point2) {
             const R = 6371; // Earth's radius in km
-            const dLat = (lat2 - lat1) * Math.PI / 180;
-            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const dLat = (point2.lat - point1.lat) * Math.PI / 180;
+            const dLng = (point2.lng - point1.lng) * Math.PI / 180;
             const a = 
                 Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-                Math.sin(dLon/2) * Math.sin(dLon/2);
+                Math.cos(point1.lat * Math.PI / 180) * Math.cos(point2.lat * Math.PI / 180) * 
+                Math.sin(dLng/2) * Math.sin(dLng/2);
             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
             return R * c;
         }
         
-        function updateDisplay() {
-            const distance = calculateTotalDistance();
-            const vehicle = detectVehicle();
+        // Calculate total distance from all points
+        function calculateTotalDistance() {
+            if (locations.length < 2) return 0;
             
-            document.getElementById('status').innerHTML = 
-                `📍 Tracking... | Distance: ${distance.toFixed(1)} km | Vehicle: ${vehicle}`;
+            let totalDistance = 0;
+            for (let i = 1; i < locations.length; i++) {
+                totalDistance += calculateDistance(locations[i-1], locations[i]);
+            }
+            return totalDistance;
         }
         
+        // Update display during tracking
+        function updateDisplay() {
+            const distance = calculateTotalDistance();
+            
+            // Update distance display
+            document.getElementById('distanceDisplay').textContent = distance.toFixed(2) + " km";
+            
+            // Update status with point count
+            document.getElementById('status').innerHTML = 
+                `📍 <strong>Tracking... (${locations.length} points recorded)</strong>`;
+        }
+        
+        // Handle geolocation errors
+        function handleGeolocationError(error) {
+            let message = "";
+            switch(error.code) {
+                case error.PERMISSION_DENIED:
+                    message = "Location permission denied. Please allow location access in your browser settings.";
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    message = "Location information unavailable. Make sure GPS/WiFi is enabled.";
+                    break;
+                case error.TIMEOUT:
+                    message = "Location request timed out. Please try again.";
+                    break;
+                default:
+                    message = "An unknown error occurred: " + error.message;
+            }
+            
+            document.getElementById('status').innerHTML = "❌ " + message;
+            document.getElementById('status').className = "error";
+            document.getElementById('gpsStatus').innerHTML = "GPS: Error";
+            
+            // Stop tracking on error
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+        }
+        
+        // Show error message
         function showError(msg) {
             document.getElementById('status').innerHTML = msg;
             document.getElementById('status').className = "error";
         }
         
-        function sendToServer() {
-            const distance = calculateTotalDistance();
-            const vehicle = detectVehicle();
+        // Select vehicle type
+        function selectVehicle(vehicle) {
+            selectedVehicle = vehicle;
             
-            // Create a unique code to send back to Colab
-            const code = `${distance.toFixed(1)}_${vehicle}_${Date.now()}`;
+            // Update UI
+            document.querySelectorAll('.vehicle-option').forEach(el => {
+                el.classList.remove('selected');
+                if (el.textContent.includes(vehicle)) {
+                    el.classList.add('selected');
+                }
+            });
             
-            document.getElementById('results').innerHTML += `
-                <p><strong>Your Code:</strong> <code>${code}</code></p>
-                <p>📋 Copy this code and paste it in Google Colab</p>
-            `;
+            document.getElementById('selectedVehicle').innerHTML = "Selected: " + vehicle;
+            document.getElementById('finalVehicle').textContent = vehicle;
+            
+            // Generate and show tracking code
+            generateTrackingCode();
         }
+        
+        // Generate tracking code
+        function generateTrackingCode() {
+            if (!selectedVehicle) {
+                document.getElementById('trackingCode').textContent = "Please select a vehicle first!";
+                return;
+            }
+            
+            const distance = calculateTotalDistance();
+            const timestamp = Math.floor(Date.now() / 1000);
+            
+            // Format vehicle name (remove spaces for code)
+            const vehicleCode = selectedVehicle.replace(/\s+/g, '_');
+            
+            // Create code
+            const code = `${distance.toFixed(2)}_${vehicleCode}_${timestamp}`;
+            
+            // Display code
+            document.getElementById('trackingCode').textContent = code;
+        }
+        
+        // Copy code to clipboard
+        function copyToClipboard() {
+            const code = document.getElementById('trackingCode').textContent;
+            
+            if (code.includes("Please select")) {
+                alert("Please select a vehicle type first!");
+                return;
+            }
+            
+            navigator.clipboard.writeText(code).then(
+                function() {
+                    alert("✅ Code copied to clipboard!\n\nCode: " + code + "\n\nPaste this in Google Colab when prompted.");
+                },
+                function(err) {
+                    // Fallback for older browsers
+                    const textArea = document.createElement("textarea");
+                    textArea.value = code;
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(textArea);
+                    alert("✅ Code copied to clipboard!\n\nCode: " + code);
+                }
+            );
+        }
+        
+        // Start timer
+        function startTimer() {
+            clearInterval(timerInterval);
+            startTime = new Date();
+            
+            timerInterval = setInterval(function() {
+                if (startTime) {
+                    const elapsed = Math.floor((new Date() - startTime) / 1000);
+                    document.getElementById('trackingTime').textContent = elapsed;
+                }
+            }, 1000);
+        }
+        
+        // Initialize
+        window.onload = function() {
+            console.log("Carbon Tracker GPS loaded successfully");
+        };
     </script>
+    
+    <footer style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; color: #666; font-size: 14px;">
+        <p><strong>Note:</strong> This tracker uses your browser's geolocation API to calculate distance. For best results:</p>
+        <ul>
+            <li>Use Google Chrome or Safari on your phone</li>
+            <li>Allow location permission when prompted</li>
+            <li>Keep the browser open while tracking</li>
+            <li>Move around to see distance updates</li>
+        </ul>
+        <p>📍 Distance is calculated using GPS coordinates (Haversine formula)</p>
+    </footer>
 </body>
 </html>
